@@ -47,7 +47,7 @@ The system's operation mode is shown in the above figure. We considered a troubl
 
 ![Architecture](/wiki/assets/DiagramaBlocos.png)
 
-The systems materials and their functionality are described below:
+The system materials and their functionality are described below:
 - 2 Servo motors DC:
 The DC servo motors are able to control the rotor's angular position very accuratly through a PWM signal input.
 The first motor will be responsable to rotate the storage unit so that the flavour of the coffee capsule select by the user is aligned with the capsules dropping plataform.

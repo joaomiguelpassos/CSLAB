@@ -11,9 +11,9 @@ The machine shall be able to give coffee capsules selected by the user. When a u
 ![System Design](/wiki/assets/Desenho.jpeg)
 
 The system consists of 4 subsystems: authentication, storage, dispenser, and user interface. 
-- The authentication subsystem is responsible for the entire process of verification and validation of the user's identity, from card reading to processing and communication with the server that will give the authorization. If a card is not recognize or a password is not valid, the subsystem shall notify the user.
-- The storage subsystem shall detect and count the number of capsules present on a section. In addition to dispensing all capsules in a section, the subsystem should be able to activate a low stock state. It is also expected to report to the operator when this state is activated or when the storage is replenished.
-- The dispenser subsystem shall give the pretended capsules to the user and update the user usage. When request by an admin, all capsules shall be dispensed. When a capsule is chosen, if the storage can't be rotated or the capsule doesn't reach the user the subsystem shall call the operator.
+- The authentication subsystem is responsible for the entire process of verification and validation of the user's identity, from card reading to processing and communication with the server that will give the authorization. If a card is not recognized or a password is not valid, the subsystem shall notify the user.
+- The storage subsystem shall detect and count the number of capsules present in ecach section. In addition to dispensing all capsules in a section, the subsystem should be able to activate a low stock state. It is also expected to report to the operator when this state is achived or when the storage is replenished.
+- The dispenser subsystem shall give the pretended capsules to the user and update the user consumption. When requested by an admin, all capsules shall be dispensed. When a capsule is chosen, if the storage can't be rotated or the capsule doesn't reach the user the subsystem shall call the operator.
 - The user interface is where the interaction with the user is made. All the information will be displayed and the user can interact with the system by tapping the screen making his choices.
 
 ---
@@ -39,7 +39,7 @@ The system's operation mode is shown in the above figure. We considered a troubl
 4. The user inserts his password;
 5. Authentication subsystem queries the server about the user;
 6. User makes his choice from the flavours shown;
-7. Dispenser subsystem rotates de sections for the pretended choice;
+7. Dispenser subsystem rotates the sections for the pretended choice;
 8. The coffee capsule is dispensed.
 
 ---

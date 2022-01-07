@@ -47,18 +47,18 @@ The system's operation mode is shown in the above figure. We considered a troubl
 
 ![Architecture](/wiki/assets/DiagramaBlocos.png)
 
-The system materials and their functionality are described below:
+The system materials and their functionality are described as follows:
 - 2 Servo motors DC:
 The DC servo motors are able to control the rotor's angular position very accuratly through a PWM signal input.
-The first motor will be responsable to rotate the storage unit so that the flavour of the coffee capsule select by the user is aligned with the capsules dropping plataform.
-The second motor will be responsable to rotate de dropping plataform that ensures the dispensing of only one coffee capsule in each iteraction.
+The first motor will be responsible to rotate the storage unit so that the flavour of the coffee capsule selected by the user is aligned with the capsules dropping plataform.
+The second motor will be responsible to rotate the dropping plataform that ensures the dispensing of only one coffee capsule in each iteration.
 - 1 Touch screen:
 The touch screen will be the main device for the user to interact with the system. This device will be the main input and output feature of the system.
 - 1 RFID tag
 - 1 RFID sensor
-The RFID sensor will be responsable for identifying the user's id from the chip tag
+The RFID sensor will be responsible for identifying the user's id from the chip tag/card
 - Infrared sensors:
 The Infrared sensors will be placed in each section of the storage system allowing the main system to know the number of coffee capsules in each section.
 - 1 RaspberryPi 4 model B:
-The Raspberrypi will be the microprocessor of the hole system and will be responsible of the dispenser system and to host the web server, the database and the MQTT server.
+The Raspberrypi will be the microprocessor of the hole system being responsible for the operation of all the subsystems. It will also host the web server and the database.
 - Cables to connect the system sensors and actuators to the raspberrypi.

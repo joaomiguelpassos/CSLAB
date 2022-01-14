@@ -52,16 +52,27 @@ void my_message_callback(struct mosquitto *mosq, void *userdata, const struct mo
          printf("%s %s\n", message->topic, message->payload);
          if (strcmp(message->payload,user.password) == 0)
          {
-            state = 2;
-            //system("mosquitto_pub -h localhost -t login/pin -m 0")  // 0 tells python user's pin matched
+            state = 3;     // password matches
          }else{
-            //system("mosquitto_pub -h localhost -t login/pin -m 1")   //-1 tells python user's pin didn't match
+            state = 2;     // password don't match
          }
       }
    }else{
       printf("%s (null)\n", message->topic);
    }
    fflush(stdout);
+}
+
+void my_connect_callback(struct mosquitto *mosq, void *userdata, int result)
+{
+   int i;
+   if(!result){
+      /* Subscribe to broker information topics on successful connect. */
+      mosquitto_subscribe(mosq, NULL, "login/id/#", 2);
+      mosquitto_subscribe(mosq, NULL, "login/pin/#", 2);
+   }else{
+      fprintf(stderr, "MQTT Connection failed\n");
+   }
 }
 
 void my_subscribe_callback(struct mosquitto *mosq, void *userdata, int mid, int qos_count, const int *granted_qos)
@@ -132,7 +143,7 @@ int main(int argc, char* argv[])
             snprintf(buf, 31, "%s%d", sql, user.id);
 
             /* Execute SQL statement */
-            rc = sqlite3_exec(db, query, callback, (void*)data, &zErrMsg);
+            rc = sqlite3_exec(db, buf, callback, (void*)data, &zErrMsg);
             
             if( rc != SQLITE_OK ) 
             {
@@ -145,9 +156,15 @@ int main(int argc, char* argv[])
             }
             break;
 
-         case 2:  // capsule selection
+         case 2:  // password didn't match, tell python
+            mosquitto_publish(mosq, NULL, "login/pin", 2, "0", 0, true);
+            state = 0;
+            break;
+
+         case 3:  // password matches and capsule selection starts
             mosquitto_publish(mosq, NULL, "login/pin", 2, "0", 0, true);
             user.auth = 1; // user is authenticated
+            
             // TO DO - capsule selection and dispenser
 
             if (wiringPiSetup() == -1)
@@ -157,12 +174,9 @@ int main(int argc, char* argv[])
                return 1;
             }
 
+            r=fork();   // creates a different process for hosting MQTT API
             if(r == 0)
-            {
                mosquitto_loop_forever(mosq, -1, 1);
-               mosquitto_destroy(mosq);
-               mosquitto_lib_cleanup();
-            }
             break;
 
          case 0:
@@ -170,5 +184,7 @@ int main(int argc, char* argv[])
             break;
       }
    }
+   mosquitto_destroy(mosq);
+   mosquitto_lib_cleanup();
    return 0;
 }

@@ -3,7 +3,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <stdlib.h>
-#include <sqlite3.h>
+#include "sqlite3/sqlite3.h"
 #include <mosquitto.h>
 #include <wiringPi.h>
 

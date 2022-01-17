@@ -3,7 +3,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <stdlib.h>
-#include "sqlite3/sqlite3.h"
+#include "sqlite3.h"
 #include <mosquitto.h>
 #include <wiringPi.h>
 
@@ -42,6 +42,7 @@ void my_message_callback(struct mosquitto *mosq, void *userdata, const struct mo
    if(message->payloadlen){
       if(strcmp(message->topic,"login/id") == 0)
       {
+
          printf("%s %s\n", message->topic, message->payload);
          user.id = atoi(message->payload);
          state = 1;
@@ -86,11 +87,11 @@ void my_subscribe_callback(struct mosquitto *mosq, void *userdata, int mid, int 
    printf("\n");
 }
 
-/*void my_log_callback(struct mosquitto *mosq, void *userdata, int level, const char *str)
+void my_log_callback(struct mosquitto *mosq, void *userdata, int level, const char *str)
 {
    // Pring all log messages regardless of level.
    printf("%s\n", str);
-}*/
+}
 
 /* ************************************* */
 
@@ -148,10 +149,11 @@ int main(int argc, char* argv[])
             if( rc != SQLITE_OK ) 
             {
                fprintf(stderr, "SQL error: %s\n", zErrMsg);
-               mosquitto_publish(mosq, NULL, "login/id", 2, "-1", 0, true); // -1 tells python user id was not found
+               mosquitto_publish(mosq, NULL, "login/idReply", 2, "-1", 0, true); // -1 tells python user id was not found
+		printf("Teste");
                sqlite3_free(zErrMsg); // free memory
             }else{
-               mosquitto_publish(mosq, NULL, "login/id", 2, "0", 0, true);  // 0 tells python that id exists
+               mosquitto_publish(mosq, NULL, "login/idReply", 2, "0", 0, true);  // 0 tells python that id exists
                sqlite3_close(db);     // close db connection
             }
             break;

@@ -1,24 +1,89 @@
 #define _GNU_SOURCE
 #include <stdio.h>
 #include <unistd.h>
+#include <pthread.h>
+#include <sched.h>
 #include <string.h>
 #include <stdlib.h>
 #include "sqlite3.h"
 #include <mosquitto.h>
 #include <wiringPi.h>
 
+#define NUM_THREADS 2
+#define MAIN_CORE 2
+#define SECONDARY_CORE 3
+#define CEILING     3
+
 struct UserData
 {
-	int id;
-	char username[15];
-	char password[15];
+   int id;
+   char username[15];
+   char password[15];
    int capsules[6];
    int auth;
+};
+
+struct taskargs 
+{
+    int priority;
+    int core;
+    struct timespec period;
+    struct timespec first_arrival;
 };
 
 // User data is defined globally so that callbacks can access it
 struct UserData user;
 int state=0;                     // aux variable for state changing
+pthread_mutex_t mutex;  // Global mutex
+// MQTT variables
+char *host = "localhost";    // MQTT HQ free broker
+int port = 1883;
+int keepalive = 60;
+bool clean_session = true;
+struct mosquitto *mosq = NULL;
+
+int set_task_priority_FIFO(int priority)
+{
+    struct sched_param params;
+    int retval;
+    
+    /* Set thread priority under SHED_FIFO scheduler. */
+    params.sched_priority = priority;
+    retval = pthread_setschedparam(pthread_self(), SCHED_FIFO, &params);
+    
+    return retval; /* 0 if success. */
+}
+
+
+int set_task_affinity(int core)
+{
+    cpu_set_t cores_mask;
+    int retval;
+    
+    /* Set affinity of thread to cores -> {0, 1, 2, 3} */
+    CPU_ZERO(&cores_mask);
+    CPU_SET(core, &cores_mask);
+    retval = pthread_setaffinity_np(pthread_self(), sizeof(cores_mask), &cores_mask);
+    
+    return retval; /* 0 if success. */
+}
+
+
+struct timespec next_arrival(struct timespec previous, struct timespec period)
+{
+    struct timespec next;
+    
+    next.tv_sec     = previous.tv_sec + period.tv_sec;   /* Seconds */
+    next.tv_nsec    = previous.tv_nsec + period.tv_nsec; /* Nanoseconds*/
+    
+    if(next.tv_nsec > 1000000000L) {
+        /* Nanoseconds can not exceed one second. */
+        next.tv_nsec -= 1000000000L;
+        next.tv_sec++;
+    }
+    
+    return next;
+}
 
 /** SQLite3 Callback
  * Return records from DB */
@@ -95,6 +160,51 @@ void my_log_callback(struct mosquitto *mosq, void *userdata, int level, const ch
 
 /* ************************************* */
 
+void * t1_task(void *arg) 
+{
+    struct taskargs * targs;
+    struct timespec next, period;
+    
+    /* Read parameters from arg. */
+    targs = (struct taskargs *) arg;
+    period  = targs->period;
+    next    = targs->first_arrival;
+    
+    /* Set affinity of thread to cores -> {0, 1, 2, 3} */
+    set_task_affinity(targs->core);
+    
+    /* Set thread priority under SHED_FIFO scheduler. */
+    set_task_priority_FIFO(targs->priority);
+
+    while(1){
+        /* Sleep until the 'next' arrival time. */
+        clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &next, 0);
+        
+        mosquitto_lib_init();
+        mosq = mosquitto_new(NULL, clean_session, NULL);
+        if(!mosq){
+           fprintf(stderr, "Error: Out of memory.\n");
+           return 1;
+        }
+        mosquitto_log_callback_set(mosq, my_log_callback);
+        mosquitto_connect_callback_set(mosq, my_connect_callback);
+        mosquitto_message_callback_set(mosq, my_message_callback);
+        mosquitto_subscribe_callback_set(mosq, my_subscribe_callback);
+
+        if(mosquitto_connect(mosq, host, port, keepalive)){
+           fprintf(stderr, "Unable to connect.\n");
+           return 1;
+        }
+
+        mosquitto_loop_forever(mosq, -1, 1);
+
+        /* Set timer for next activation. */
+        next = next_arrival(next, period);
+    }
+    mosquitto_destroy(mosq);
+    mosquitto_lib_cleanup();
+}
+
 int main(int argc, char* argv[]) 
 {
    // DB variables
@@ -102,33 +212,52 @@ int main(int argc, char* argv[])
    char *zErrMsg = 0, buf[35], *sql;;
    int rc, r;
    const char* data = "Callback function called";
-
-   // MQTT variables
-   char *host = "52.13.116.147";    // MQTT HQ free broker
-   int port = 1883;
-   int keepalive = 60;
-   bool clean_session = true;
-   struct mosquitto *mosq = NULL;
    user.auth=0;                    // System starts with no one authenticated
 
-   mosquitto_lib_init();
-   mosq = mosquitto_new(NULL, clean_session, NULL);
-   if(!mosq){
-      fprintf(stderr, "Error: Out of memory.\n");
+   system("sudo rm /var/lib/mosquitto/mosquitto.db");
+
+   struct taskargs targs[NUM_THREADS];
+   pthread_t threads[NUM_THREADS];
+   struct timespec first_arrival;
+   pthread_mutexattr_t mutex_attr;
+
+   /* Create and initialize the mutex. */
+   pthread_mutexattr_init(&mutex_attr);
+   pthread_mutexattr_setprotocol(&mutex_attr, PTHREAD_PRIO_PROTECT);
+   pthread_mutexattr_setprioceiling(&mutex_attr, CEILING);
+   pthread_mutex_init(&mutex, &mutex_attr);
+   pthread_mutexattr_destroy(&mutex_attr);
+
+   /* Set the time instant when tasks will arrive (in less than 2 seconds). */
+   clock_gettime(CLOCK_MONOTONIC, &first_arrival);
+   first_arrival.tv_nsec   += 100000000;
+   first_arrival.tv_sec    += first_arrival.tv_nsec / 1000000000L;
+   first_arrival.tv_nsec   = first_arrival.tv_nsec % 1000000000L;
+   
+   /* HIGH priority task. */
+   // T1: Button Control
+   targs[0].priority       = 4;
+   targs[0].core           = MAIN_CORE;
+   targs[0].period.tv_sec  = 0;
+   targs[0].period.tv_nsec = 100000000; /* 20 ms */
+   targs[0].first_arrival  = first_arrival;
+
+   pthread_create(&threads[0], NULL, t1_task, &targs[0]);
+   //pthread_join(threads[0], NULL);
+
+   if (wiringPiSetup() == -1)
+   {
+      // when initialize wiring failed,print messageto screen
+      printf("setup wiringPi failed !");
       return 1;
    }
-   mosquitto_log_callback_set(mosq, my_log_callback);
-   mosquitto_connect_callback_set(mosq, my_connect_callback);
-   mosquitto_message_callback_set(mosq, my_message_callback);
-   mosquitto_subscribe_callback_set(mosq, my_subscribe_callback);
 
    while(1)
    {
       switch(state)
       {
-         case 1:  // an ID was detected on RFID reader
+         case 1:
             state = 0; // reset state
-
             /* Open database */
             rc = sqlite3_open("test.db", &db);
 
@@ -139,6 +268,7 @@ int main(int argc, char* argv[])
             } else {
                fprintf(stderr, "Opened database successfully\n");
             }
+                           
             /* Create SQL statement */
             sql = "SELECT * from login WHERE id=";
             snprintf(buf, 31, "%s%d", sql, user.id);
@@ -150,43 +280,21 @@ int main(int argc, char* argv[])
             {
                fprintf(stderr, "SQL error: %s\n", zErrMsg);
                mosquitto_publish(mosq, NULL, "login/idReply", 2, "-1", 0, true); // -1 tells python user id was not found
-		printf("Teste");
                sqlite3_free(zErrMsg); // free memory
             }else{
                mosquitto_publish(mosq, NULL, "login/idReply", 2, "0", 0, true);  // 0 tells python that id exists
                sqlite3_close(db);     // close db connection
             }
             break;
-
-         case 2:  // password didn't match, tell python
-            mosquitto_publish(mosq, NULL, "login/pin", 2, "0", 0, true);
+         
+         case 2:
+            //mosquitto_publish(mosq, NULL, "login/pin", 2, "0", 0, true);
+            printf("fds\n");
             state = 0;
-            break;
-
-         case 3:  // password matches and capsule selection starts
-            mosquitto_publish(mosq, NULL, "login/pin", 2, "0", 0, true);
-            user.auth = 1; // user is authenticated
-            
-            // TO DO - capsule selection and dispenser
-
-            if (wiringPiSetup() == -1)
-            {
-               // when initialize wiring failed,print messageto screen
-               printf("setup wiringPi failed !");
-               return 1;
-            }
-
-            r=fork();   // creates a different process for hosting MQTT API
-            if(r == 0)
-               mosquitto_loop_forever(mosq, -1, 1);
-            break;
-
-         case 0:
-            // does nothing
             break;
       }
    }
-   mosquitto_destroy(mosq);
-   mosquitto_lib_cleanup();
+
+   pthread_mutex_destroy(&mutex);
    return 0;
 }

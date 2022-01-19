@@ -33,7 +33,7 @@ struct taskargs
 
 // User data is defined globally so that callbacks can access it
 struct UserData user;
-int state=0;                     // aux variable for state changing
+int state=0, exist=0;                     // aux variable for state changing
 pthread_mutex_t mutex;  // Global mutex
 // MQTT variables
 char *host = "localhost";    // MQTT HQ free broker
@@ -92,6 +92,7 @@ static int callback(void *data, int argc, char **argv, char **azColName)
    int i;
    //fprintf(stderr, "%s: ", (const char*)data);
    
+   exist = 1;
    for(i = 0; i<argc; i++){
       user.id = atoi(argv[0]);
       strcpy(user.username,argv[1]);
@@ -209,7 +210,8 @@ int main(int argc, char* argv[])
 {
    // DB variables
    sqlite3 *db;
-   char *zErrMsg = 0, buf[35], *sql;;
+   char *zErrMsg = 0, buf[35], buf_2[6], *sql;;
+   char* s = "temp";
    int rc, r;
    const char* data = "Callback function called";
    user.auth=0;                    // System starts with no one authenticated
@@ -259,7 +261,7 @@ int main(int argc, char* argv[])
          case 1:
             state = 0; // reset state
             /* Open database */
-            rc = sqlite3_open("test.db", &db);
+            rc = sqlite3_open("teste.db", &db);
 
             if( rc ) 
             {
@@ -279,11 +281,23 @@ int main(int argc, char* argv[])
             if( rc != SQLITE_OK ) 
             {
                fprintf(stderr, "SQL error: %s\n", zErrMsg);
-               mosquitto_publish(mosq, NULL, "login/idReply", 2, "-1", 0, true); // -1 tells python user id was not found
                sqlite3_free(zErrMsg); // free memory
             }else{
-               mosquitto_publish(mosq, NULL, "login/idReply", 2, "0", 0, true);  // 0 tells python that id exists
                sqlite3_close(db);     // close db connection
+            }
+            delay(500);
+            printf("Exist %d", exist);
+            if(exist == 1)
+            {
+	       char* s = "-1";
+	       snprintf(buf_2,10,"%s",s);
+               mosquitto_publish(mosq, NULL, "login/idReply", 2, buf_2, 0, true);  // -1 tells python that id exists
+               exist = 0;
+            } else if (exist == 0)
+            {
+	       char* s = "-2";
+	       snprintf(buf_2,10,"%s",s);
+               mosquitto_publish(mosq, NULL, "login/idReply", 2, buf_2, 0, true); // -2 tells python user id was not found
             }
             break;
          

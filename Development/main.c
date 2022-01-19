@@ -50,7 +50,6 @@ int set_task_priority_FIFO(int priority)
     return retval; /* 0 if success. */
 }
 
-
 int set_task_affinity(int core)
 {
     cpu_set_t cores_mask;
@@ -116,8 +115,10 @@ void my_message_callback(struct mosquitto *mosq, void *userdata, const struct mo
          if (strcmp(message->payload,user.password) == 0)
          {
             state = 3;     // password matches
+            printf("Matched!\n");
          }else{
             state = 2;     // password don't match
+            printf("Not matched...\n");
          }
       }
    }else{
@@ -136,17 +137,6 @@ void my_connect_callback(struct mosquitto *mosq, void *userdata, int result)
    }else{
       fprintf(stderr, "MQTT Connection failed\n");
    }
-}
-
-void my_subscribe_callback(struct mosquitto *mosq, void *userdata, int mid, int qos_count, const int *granted_qos)
-{
-   int i;
-
-   printf("Subscribed (mid: %d): %d", mid, granted_qos[0]);
-   for(i=1; i<qos_count; i++){
-      printf(", %d", granted_qos[i]);
-   }
-   printf("\n");
 }
 
 /* ************************************* */
@@ -182,10 +172,10 @@ void * t1_task(void *arg)
            fprintf(stderr, "Error: Out of memory.\n");
            return 1;
         }
-        //mosquitto_log_callback_set(mosq, my_log_callback);
+
+        // MQTT Callbacks
         mosquitto_connect_callback_set(mosq, my_connect_callback);
         mosquitto_message_callback_set(mosq, my_message_callback);
-        mosquitto_subscribe_callback_set(mosq, my_subscribe_callback);
 
         if(mosquitto_connect(mosq, host, port, keepalive)){
            fprintf(stderr, "Unable to connect.\n");
@@ -268,7 +258,6 @@ int main(int argc, char* argv[])
             /* Create SQL statement */
             sql = "SELECT * from login WHERE id=";
             snprintf(buf, 40, "%s%d", sql, user.id);
-            printf("Query: %s\n", buf);
 
             /* Execute SQL statement */
             rc = sqlite3_exec(db, buf, callback, (void*)data, &zErrMsg);
@@ -281,7 +270,6 @@ int main(int argc, char* argv[])
                sqlite3_close(db);     // close db connection
             }
             delay(500);
-            printf("Exist %d",exist);
             if(exist == 1)
             {
 	            char* s = "-1";
@@ -296,8 +284,14 @@ int main(int argc, char* argv[])
             break;
          
          case 2:
-            //mosquitto_publish(mosq, NULL, "login/pin", 2, "0", 0, true);
+            mosquitto_publish(mosq, NULL, "login/pinReply", 2, "-2", 0, true);   // -1 tells python that password didn't match
             state = 0;
+            break;
+
+         case 3:
+            mosquitto_publish(mosq, NULL, "login/pinReply", 2, "-1", 0, true);   // -1 tells python that id exists
+
+            // TODO motor code
             break;
       }
    }

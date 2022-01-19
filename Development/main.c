@@ -36,10 +36,6 @@ struct UserData user;
 int state=0, exist=0;                     // aux variable for state changing
 pthread_mutex_t mutex;  // Global mutex
 // MQTT variables
-char *host = "localhost";    // MQTT HQ free broker
-int port = 1883;
-int keepalive = 60;
-bool clean_session = true;
 struct mosquitto *mosq = NULL;
 
 int set_task_priority_FIFO(int priority)
@@ -90,8 +86,7 @@ struct timespec next_arrival(struct timespec previous, struct timespec period)
 static int callback(void *data, int argc, char **argv, char **azColName)
 {
    int i;
-   //fprintf(stderr, "%s: ", (const char*)data);
-   
+
    exist = 1;
    for(i = 0; i<argc; i++){
       user.id = atoi(argv[0]);
@@ -111,6 +106,7 @@ void my_message_callback(struct mosquitto *mosq, void *userdata, const struct mo
 
          printf("%s %s\n", message->topic, message->payload);
          user.id = atoi(message->payload);
+         printf("UserID: %d\n", user.id);
          state = 1;
       }
 
@@ -153,18 +149,17 @@ void my_subscribe_callback(struct mosquitto *mosq, void *userdata, int mid, int 
    printf("\n");
 }
 
-void my_log_callback(struct mosquitto *mosq, void *userdata, int level, const char *str)
-{
-   // Pring all log messages regardless of level.
-   printf("%s\n", str);
-}
-
 /* ************************************* */
 
 void * t1_task(void *arg) 
 {
     struct taskargs * targs;
     struct timespec next, period;
+
+    char *host = "localhost";
+    int port = 1883;
+    int keepalive = 60;
+    bool clean_session = true;
     
     /* Read parameters from arg. */
     targs = (struct taskargs *) arg;
@@ -187,7 +182,7 @@ void * t1_task(void *arg)
            fprintf(stderr, "Error: Out of memory.\n");
            return 1;
         }
-        mosquitto_log_callback_set(mosq, my_log_callback);
+        //mosquitto_log_callback_set(mosq, my_log_callback);
         mosquitto_connect_callback_set(mosq, my_connect_callback);
         mosquitto_message_callback_set(mosq, my_message_callback);
         mosquitto_subscribe_callback_set(mosq, my_subscribe_callback);
@@ -210,7 +205,7 @@ int main(int argc, char* argv[])
 {
    // DB variables
    sqlite3 *db;
-   char *zErrMsg = 0, buf[35], buf_2[6], *sql;;
+   char *zErrMsg = 0, buf[35], buf_2[6], *sql;
    char* s = "temp";
    int rc, r;
    const char* data = "Callback function called";
@@ -245,7 +240,6 @@ int main(int argc, char* argv[])
    targs[0].first_arrival  = first_arrival;
 
    pthread_create(&threads[0], NULL, t1_task, &targs[0]);
-   //pthread_join(threads[0], NULL);
 
    if (wiringPiSetup() == -1)
    {
@@ -258,7 +252,7 @@ int main(int argc, char* argv[])
    {
       switch(state)
       {
-         case 1:
+         case 1:     // received an ID from interface and verifies it. Returns to interface -1 if exists else -2
             state = 0; // reset state
             /* Open database */
             rc = sqlite3_open("teste.db", &db);
@@ -273,7 +267,8 @@ int main(int argc, char* argv[])
                            
             /* Create SQL statement */
             sql = "SELECT * from login WHERE id=";
-            snprintf(buf, 31, "%s%d", sql, user.id);
+            snprintf(buf, 40, "%s%d", sql, user.id);
+            printf("Query: %s\n", buf);
 
             /* Execute SQL statement */
             rc = sqlite3_exec(db, buf, callback, (void*)data, &zErrMsg);
@@ -286,24 +281,22 @@ int main(int argc, char* argv[])
                sqlite3_close(db);     // close db connection
             }
             delay(500);
-            printf("Exist %d", exist);
+            printf("Exist %d",exist);
             if(exist == 1)
             {
-	       char* s = "-1";
-	       snprintf(buf_2,10,"%s",s);
+	            char* s = "-1";
+	            snprintf(buf_2,10,"%s",s);
                mosquitto_publish(mosq, NULL, "login/idReply", 2, buf_2, 0, true);  // -1 tells python that id exists
                exist = 0;
-            } else if (exist == 0)
-            {
-	       char* s = "-2";
-	       snprintf(buf_2,10,"%s",s);
+            } else if (exist == 0){
+	            char* s = "-2";
+	            snprintf(buf_2,10,"%s",s);
                mosquitto_publish(mosq, NULL, "login/idReply", 2, buf_2, 0, true); // -2 tells python user id was not found
             }
             break;
          
          case 2:
             //mosquitto_publish(mosq, NULL, "login/pin", 2, "0", 0, true);
-            printf("fds\n");
             state = 0;
             break;
       }

@@ -11,7 +11,7 @@ import time
 import paho.mqtt.client as mqtt
 
 def on_message(client, userdata, msg):
-    global ID,ID_Reply,Pass_Reply,Pas,End_Flag,Expresso_Capsules_init,Latte_Capsules_init,Mocha_Capsules_init,Cappuccino_Capsules_init,Black_Capsules_init,Ristretto_Capsules_init
+    global ID,ID_Reply,Pass_Reply,Pas,End_Flag,Expresso_Capsules_init,Latte_Capsules_init,Mocha_Capsules_init,Cappuccino_Capsules_init,Black_Capsules_init,Ristretto_Capsules_init,LOW,LOW_first
 
     mensagem = msg.payload.decode('utf-8')
     print("Reply =" + str(mensagem))
@@ -51,6 +51,8 @@ def on_message(client, userdata, msg):
         Cappuccino_Capsules_init = 5
         Black_Capsules_init = 5
         Ristretto_Capsules_init = 5
+        LOW = 0
+        LOW_first = 1
     
     
 def Logout():
@@ -60,7 +62,7 @@ def Logout():
     Main()
 
 def Ejetar_Capsulas():
-    global P,Loading_Page,Third_Page,Number_Express_Capsules,Number_Latte_Capsules,Number_Mocha_Capsules,Number_Cappuccino_Capsules,Number_Black_Capsules,Number_Ristretto_Capsules,Expresso_Capsules_init,Latte_Capsules_init,Mocha_Capsules_init,Cappuccino_Capsules_init,Black_Capsules_init,Ristretto_Capsules_init
+    global P,Loading_Page,Third_Page,Number_Express_Capsules,Number_Latte_Capsules,Number_Mocha_Capsules,Number_Cappuccino_Capsules,Number_Black_Capsules,Number_Ristretto_Capsules,Expresso_Capsules_init,Latte_Capsules_init,Mocha_Capsules_init,Cappuccino_Capsules_init,Black_Capsules_init,Ristretto_Capsules_init,LOW,LOW_first
     
     Dispense_Flag = 0
     
@@ -100,6 +102,13 @@ def Ejetar_Capsulas():
         Black_Capsules_init -= Number_Black_Capsules
         Ristretto_Capsules_init -= Number_Ristretto_Capsules
         
+        if Expresso_Capsules_init <= 2 or Latte_Capsules_init <= 2 or Mocha_Capsules_init <= 2 or Cappuccino_Capsules_init <= 2 or Black_Capsules_init <= 2 or Ristretto_Capsules_init <= 2:
+            LOW = 1
+        if LOW == 1 and LOW_first == 1:
+            client.publish("capsules/low")
+            print("Low stock")
+            LOW_first = 0
+            
         Capsules_to_be_dispensed = Selected_capsules_Expresso + " " + Selected_capsules_Latte + " " + Selected_capsules_Mocha + " " + Selected_capsules_Cappuccino + " " + Selected_capsules_Black + " " + Selected_capsules_Ristretto + " "        
         print(Capsules_to_be_dispensed)
         client.publish("capsules/dispenser",Capsules_to_be_dispensed)
@@ -789,6 +798,8 @@ def Main():
     
     First_Page.mainloop()
 
+LOW_first = 1
+LOW = 0
 Expresso_Capsules_init = 5
 Latte_Capsules_init = 5
 Mocha_Capsules_init = 5

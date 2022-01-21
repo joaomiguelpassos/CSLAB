@@ -8,6 +8,7 @@
 #include "sqlite3.h"
 #include <mosquitto.h>
 #include <wiringPi.h>
+#include "asm.h"
 
 #define NUM_THREADS 2
 #define MAIN_CORE 2
@@ -20,7 +21,6 @@ struct UserData
    char username[15];
    char password[15];
    int capsules[6];
-   int auth;
 };
 
 struct taskargs 
@@ -31,10 +31,9 @@ struct taskargs
     struct timespec first_arrival;
 };
 
-// User data is defined globally so that callbacks can access it
+//Global variables are defined so that callbacks can access them
 struct UserData user;
-int state=0, exist=0;                     // aux variable for state changing
-pthread_mutex_t mutex;  // Global mutex
+int state=0, exist=0, pin1=0, pin2=0, cmp=0, selection[6] = {0,0,0,0,0,0};
 // MQTT variables
 struct mosquitto *mosq = NULL;
 
@@ -84,14 +83,18 @@ struct timespec next_arrival(struct timespec previous, struct timespec period)
  * Return records from DB */
 static int callback(void *data, int argc, char **argv, char **azColName)
 {
-   int i;
-
    exist = 1;
-   for(i = 0; i<argc; i++){
-      user.id = atoi(argv[0]);
-      strcpy(user.username,argv[1]);
-      strcpy(user.password,argv[2]);
-   }
+   user.id = atoi(argv[0]);
+   strcpy(user.username,argv[1]);
+   strcpy(user.password,argv[2]);
+   pin1 = atoi(user.password);
+   user.capsules[0] = atoi(argv[3]);
+   user.capsules[1] = atoi(argv[4]);
+   user.capsules[2] = atoi(argv[5]);
+   user.capsules[3] = atoi(argv[6]);
+   user.capsules[4] = atoi(argv[7]);
+   user.capsules[5] = atoi(argv[8]);
+   
    return 0;
 }
 /* ************************************* */
@@ -102,8 +105,6 @@ void my_message_callback(struct mosquitto *mosq, void *userdata, const struct mo
    if(message->payloadlen){
       if(strcmp(message->topic,"login/id") == 0)
       {
-
-         printf("%s %s\n", message->topic, message->payload);
          user.id = atoi(message->payload);
          printf("UserID: %d\n", user.id);
          state = 1;
@@ -111,8 +112,8 @@ void my_message_callback(struct mosquitto *mosq, void *userdata, const struct mo
 
       if(strcmp(message->topic,"login/pin") == 0)
       {
-         printf("%s %s\n", message->topic, message->payload);
-         if (strcmp(message->payload,user.password) == 0)
+         pin2 = atoi(message->payload);
+         if (comparePIN() == 1)
          {
             state = 3;     // password matches
             printf("Matched!\n");
@@ -120,6 +121,31 @@ void my_message_callback(struct mosquitto *mosq, void *userdata, const struct mo
             state = 2;     // password don't match
             printf("Not matched...\n");
          }
+      }
+      if(strcmp(message->topic,"capsules/espresso")==0)
+      {
+         user.capsules[0] += atoi(message->payload);
+      }
+      if(strcmp(message->topic,"capsules/latte")==0)
+      {
+         user.capsules[1] += atoi(message->payload);
+      }
+      if(strcmp(message->topic,"capsules/mocha")==0)
+      {
+         user.capsules[2] += atoi(message->payload);
+      }
+      if(strcmp(message->topic,"capsules/cappuccino")==0)
+      {
+         user.capsules[3] += atoi(message->payload);
+      }
+      if(strcmp(message->topic,"capsules/black")==0)
+      {
+         user.capsules[4] += atoi(message->payload);
+      }
+      if(strcmp(message->topic,"capsules/ristretto")==0)
+      {
+         user.capsules[5] += atoi(message->payload);
+         state = 4;
       }
    }else{
       printf("%s (null)\n", message->topic);
@@ -129,11 +155,16 @@ void my_message_callback(struct mosquitto *mosq, void *userdata, const struct mo
 
 void my_connect_callback(struct mosquitto *mosq, void *userdata, int result)
 {
-   int i;
    if(!result){
       /* Subscribe to broker information topics on successful connect. */
       mosquitto_subscribe(mosq, NULL, "login/id/#", 2);
       mosquitto_subscribe(mosq, NULL, "login/pin/#", 2);
+      mosquitto_subscribe(mosq, NULL, "capsules/espresso/#", 2);
+      mosquitto_subscribe(mosq, NULL, "capsules/latte/#", 2);
+      mosquitto_subscribe(mosq, NULL, "capsules/mocha/#", 2);
+      mosquitto_subscribe(mosq, NULL, "capsules/cappuccino/#", 2);
+      mosquitto_subscribe(mosq, NULL, "capsules/black/#", 2);
+      mosquitto_subscribe(mosq, NULL, "capsules/ristretto/#", 2);
    }else{
       fprintf(stderr, "MQTT Connection failed\n");
    }
@@ -146,7 +177,7 @@ void * t1_task(void *arg)
     struct taskargs * targs;
     struct timespec next, period;
 
-    char *host = "localhost";
+    char *host = "localhost"; // MQTTHQ: public.mqtthq.com
     int port = 1883;
     int keepalive = 60;
     bool clean_session = true;
@@ -168,6 +199,7 @@ void * t1_task(void *arg)
         
         mosquitto_lib_init();
         mosq = mosquitto_new(NULL, clean_session, NULL);
+        mosquitto_username_pw_set(mosq, "user", "lol123");
         if(!mosq){
            fprintf(stderr, "Error: Out of memory.\n");
            return 1;
@@ -195,25 +227,16 @@ int main(int argc, char* argv[])
 {
    // DB variables
    sqlite3 *db;
-   char *zErrMsg = 0, buf[35], buf_2[6], *sql;
+   char *zErrMsg = 0, buf[35], buf_2[6], buf_3[100], *sql;
    char* s = "temp";
    int rc, r;
    const char* data = "Callback function called";
-   user.auth=0;                    // System starts with no one authenticated
 
    system("sudo rm /var/lib/mosquitto/mosquitto.db");
 
    struct taskargs targs[NUM_THREADS];
    pthread_t threads[NUM_THREADS];
    struct timespec first_arrival;
-   pthread_mutexattr_t mutex_attr;
-
-   /* Create and initialize the mutex. */
-   pthread_mutexattr_init(&mutex_attr);
-   pthread_mutexattr_setprotocol(&mutex_attr, PTHREAD_PRIO_PROTECT);
-   pthread_mutexattr_setprioceiling(&mutex_attr, CEILING);
-   pthread_mutex_init(&mutex, &mutex_attr);
-   pthread_mutexattr_destroy(&mutex_attr);
 
    /* Set the time instant when tasks will arrive (in less than 2 seconds). */
    clock_gettime(CLOCK_MONOTONIC, &first_arrival);
@@ -222,8 +245,8 @@ int main(int argc, char* argv[])
    first_arrival.tv_nsec   = first_arrival.tv_nsec % 1000000000L;
    
    /* HIGH priority task. */
-   // T1: Button Control
-   targs[0].priority       = 4;
+   // T1: Mosquitto Broker
+   targs[0].priority       = 1;
    targs[0].core           = MAIN_CORE;
    targs[0].period.tv_sec  = 0;
    targs[0].period.tv_nsec = 100000000; /* 20 ms */
@@ -237,6 +260,16 @@ int main(int argc, char* argv[])
       printf("setup wiringPi failed !");
       return 1;
    }
+   /* Open database */
+   rc = sqlite3_open("teste.db", &db);
+
+   if( rc ) 
+   {
+      fprintf(stderr, "Can't open database: %s\n", sqlite3_errmsg(db));
+   } else {
+      fprintf(stderr, "Opened database successfully\n");
+   }
+
 
    while(1)
    {
@@ -244,20 +277,11 @@ int main(int argc, char* argv[])
       {
          case 1:     // received an ID from interface and verifies it. Returns to interface -1 if exists else -2
             state = 0; // reset state
-            /* Open database */
-            rc = sqlite3_open("teste.db", &db);
-
-            if( rc ) 
-            {
-               fprintf(stderr, "Can't open database: %s\n", sqlite3_errmsg(db));
-               //return(0);
-            } else {
-               fprintf(stderr, "Opened database successfully\n");
-            }
                            
             /* Create SQL statement */
             sql = "SELECT * from login WHERE id=";
             snprintf(buf, 40, "%s%d", sql, user.id);
+            sql = NULL; // resets pointer
 
             /* Execute SQL statement */
             rc = sqlite3_exec(db, buf, callback, (void*)data, &zErrMsg);
@@ -266,10 +290,8 @@ int main(int argc, char* argv[])
             {
                fprintf(stderr, "SQL error: %s\n", zErrMsg);
                sqlite3_free(zErrMsg); // free memory
-            }else{
-               sqlite3_close(db);     // close db connection
             }
-            delay(500);
+            delay(500); // just to ensure that BD returns data before If sentence
             if(exist == 1)
             {
 	            char* s = "-1";
@@ -290,12 +312,24 @@ int main(int argc, char* argv[])
 
          case 3:
             mosquitto_publish(mosq, NULL, "login/pinReply", 2, "-1", 0, true);   // -1 tells python that id exists
+            state = 0;
+            break;
 
-            // TODO motor code
+         case 4:
+            snprintf(buf_3, 100,"UPDATE login SET ESPRESSO=%d, LATTE=%d, MOCHA=%d, CAPPUCINO=%d, BLACK=%d, RISTRETTO=%d WHERE ID=%d;",user.capsules[0], user.capsules[1], user.capsules[2], user.capsules[3], user.capsules[4], user.capsules[5], user.id);
+            printf("%s\n", buf_3);
+            rc = sqlite3_exec(db, buf_3, callback, (void*)data, &zErrMsg);
+            if( rc != SQLITE_OK ) 
+            {
+               fprintf(stderr, "SQL error: %s\n", zErrMsg);
+               sqlite3_free(zErrMsg); // free memory
+            }else{
+               //sqlite3_close(db);     // close db connection
+               printf("Data updated successfully\n");
+            }
+            state = 0;
             break;
       }
    }
-
-   pthread_mutex_destroy(&mutex);
    return 0;
 }

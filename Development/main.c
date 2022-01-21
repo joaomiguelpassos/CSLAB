@@ -147,6 +147,10 @@ void my_message_callback(struct mosquitto *mosq, void *userdata, const struct mo
          user.capsules[5] += atoi(message->payload);
          state = 4;
       }
+      if(strcmp(message->topic,"capsules/low")==0)
+      {
+         state = 5;
+      }
    }else{
       printf("%s (null)\n", message->topic);
    }
@@ -165,6 +169,7 @@ void my_connect_callback(struct mosquitto *mosq, void *userdata, int result)
       mosquitto_subscribe(mosq, NULL, "capsules/cappuccino/#", 2);
       mosquitto_subscribe(mosq, NULL, "capsules/black/#", 2);
       mosquitto_subscribe(mosq, NULL, "capsules/ristretto/#", 2);
+      mosquitto_subscribe(mosq, NULL, "capsules/low/#", 2);
    }else{
       fprintf(stderr, "MQTT Connection failed\n");
    }
@@ -231,6 +236,12 @@ int main(int argc, char* argv[])
    char* s = "temp";
    int rc, r;
    const char* data = "Callback function called";
+
+   //Email variables
+   char cmd[100];  // to hold the command.
+   char to[] = "joao.passos@ieee.org"; // email id of the recepient.
+   char body[] = "Low Capsules Status, please check the machine";    // email body.
+   char tempFile[100];     // name of tempfile.
 
    system("sudo rm /var/lib/mosquitto/mosquitto.db");
 
@@ -327,6 +338,12 @@ int main(int argc, char* argv[])
                //sqlite3_close(db);     // close db connection
                printf("Data updated successfully\n");
             }
+            state = 0;
+            break;
+
+         case 5:            
+            system("sendmail joao.passos@ieee.org < email");     // execute it.
+            printf("Email sent!\n");
             state = 0;
             break;
       }

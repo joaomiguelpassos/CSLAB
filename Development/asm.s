@@ -1,19 +1,26 @@
 .balign 4
 .text
-	.global pin1
-    .global pin2
+	.globl pin1
+    .globl pin2
 
 .balign 4
 .global comparePIN
 
 comparePIN:
-    MOV R0, =pin1
-    MOV R1, =pin2
-    CMP R0, R1
+    ldr r1, =pin1
+    ldr r0, [r1]
+
+    ldr r2, =pin2
+    ldr r1, [r2]
+
+    CMP r0,r1
     BEQ correctPIN
-    MOV R0, #0
-    BX lr
+    BNE incorrectPIN
 
 correctPIN:
-    MOV R0, #1
+    MOV r0, #1
+    BX lr
+
+incorrectPIN:
+    MOV r0,#0
     BX lr
